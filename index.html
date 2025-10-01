@@ -28,6 +28,8 @@
             justify-content: space-between;
             align-items: center;
             margin-bottom: 30px;
+            flex-wrap: wrap;
+            gap: 15px;
         }
         
         h1 {
@@ -47,8 +49,22 @@
             gap: 8px;
         }
         
-        .save-indicator.saving {
-            background: rgba(255,255,255,0.3);
+        .save-indicator.syncing {
+            background: rgba(52, 152, 219, 0.8);
+            animation: pulse 1.5s infinite;
+        }
+        
+        .save-indicator.success {
+            background: rgba(46, 204, 113, 0.8);
+        }
+        
+        .save-indicator.error {
+            background: rgba(231, 76, 60, 0.8);
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
         }
         
         .grid {
@@ -248,7 +264,6 @@
             color: white;
         }
         
-        /* Modal */
         .modal {
             display: none;
             position: fixed;
@@ -355,16 +370,6 @@
             background: #dfe4ea;
         }
         
-        .details-display {
-            background: #f8f9fa;
-            padding: 20px;
-            border-radius: 8px;
-            white-space: pre-wrap;
-            line-height: 1.6;
-            color: #2d3436;
-        }
-        
-        /* Edit Input */
         .edit-input {
             flex: 1;
             padding: 8px;
@@ -376,19 +381,64 @@
         .edit-input:focus {
             outline: none;
         }
+
+        .loading-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            z-index: 999;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .loading-overlay.active {
+            display: flex;
+        }
+
+        .loading-spinner {
+            background: white;
+            padding: 30px;
+            border-radius: 15px;
+            text-align: center;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 15px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
     </style>
 </head>
 <body>
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="loading-spinner">
+            <div class="spinner"></div>
+            <p>Conectando ao Firebase...</p>
+        </div>
+    </div>
+
     <div class="container">
         <div class="header">
             <h1>📊 Painel de Demandas</h1>
             <div class="save-indicator" id="saveIndicator">
-                ✅ Tudo salvo
+                🔄 Conectando...
             </div>
         </div>
         
         <div class="grid">
-            <!-- Diário -->
             <div class="card">
                 <div class="card-header">
                     <div class="icon daily">📅</div>
@@ -401,7 +451,6 @@
                 </div>
             </div>
             
-            <!-- Mensal -->
             <div class="card">
                 <div class="card-header">
                     <div class="icon monthly">📆</div>
@@ -414,7 +463,6 @@
                 </div>
             </div>
             
-            <!-- Bimestral -->
             <div class="card">
                 <div class="card-header">
                     <div class="icon bimonthly">📋</div>
@@ -427,7 +475,6 @@
                 </div>
             </div>
             
-            <!-- Semestral -->
             <div class="card">
                 <div class="card-header">
                     <div class="icon semiannual">📈</div>
@@ -443,12 +490,9 @@
         
         <div class="actions">
             <button class="btn-action" onclick="exportData()">📥 Exportar Backup</button>
-            <button class="btn-action" onclick="importData()">📤 Importar Backup</button>
-            <input type="file" id="importFile" style="display: none;" accept=".json" onchange="handleImport(event)">
         </div>
     </div>
     
-    <!-- Modal de Detalhes -->
     <div class="modal" id="detailsModal">
         <div class="modal-content">
             <div class="modal-header">
@@ -460,8 +504,22 @@
         </div>
     </div>
     
-    <script>
-        const STORAGE_KEY = 'painel_demandas_tasks';
+    <script type="module">
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
+        import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot, query } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyDhXZWfDN313nvluHmjqJSKBfT75p8o-hE",
+            authDomain: "painel-demandas-e491c.firebaseapp.com",
+            projectId: "painel-demandas-e491c",
+            storageBucket: "painel-demandas-e491c.firebasestorage.app",
+            messagingSenderId: "151045979223",
+            appId: "1:151045979223:web:b6153600d400974fe5f712"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        
         let tasks = {
             daily: [],
             monthly: [],
@@ -470,107 +528,157 @@
         };
         
         let editingTask = null;
+        let isInitialLoad = true;
         
-        // Carregar dados salvos ao iniciar
-        function loadTasks() {
-            const saved = localStorage.getItem(STORAGE_KEY);
-            if (saved) {
-                try {
-                    tasks = JSON.parse(saved);
-                    Object.keys(tasks).forEach(category => renderTasks(category));
-                } catch (e) {
-                    console.error('Erro ao carregar tarefas:', e);
-                }
-            } else {
-                Object.keys(tasks).forEach(category => renderTasks(category));
-            }
-        }
-        
-        // Salvar dados automaticamente
-        function saveTasks() {
-            try {
-                localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
-                showSaveIndicator();
-            } catch (e) {
-                console.error('Erro ao salvar tarefas:', e);
-                alert('Erro ao salvar. Seu navegador pode estar com armazenamento cheio.');
-            }
-        }
-        
-        // Mostrar indicador de salvamento
-        function showSaveIndicator() {
+        function updateIndicator(status, text) {
             const indicator = document.getElementById('saveIndicator');
-            indicator.textContent = '💾 Salvando...';
-            indicator.classList.add('saving');
-            
-            setTimeout(() => {
-                indicator.textContent = '✅ Tudo salvo';
-                indicator.classList.remove('saving');
-            }, 500);
+            indicator.className = 'save-indicator ' + status;
+            indicator.textContent = text;
         }
         
-        function addTask(category) {
+        function showLoading(show) {
+            const overlay = document.getElementById('loadingOverlay');
+            if (show) {
+                overlay.classList.add('active');
+            } else {
+                overlay.classList.remove('active');
+            }
+        }
+        
+        // Escutar mudanças em tempo real
+        const q = query(collection(db, 'tasks'));
+        onSnapshot(q, (snapshot) => {
+            const newTasks = {
+                daily: [],
+                monthly: [],
+                bimonthly: [],
+                semiannual: []
+            };
+            
+            snapshot.forEach((doc) => {
+                const data = doc.data();
+                const category = data.category;
+                
+                if (newTasks[category]) {
+                    newTasks[category].push({
+                        id: doc.id,
+                        text: data.text,
+                        completed: data.completed || false,
+                        details: data.details || ''
+                    });
+                }
+            });
+            
+            tasks = newTasks;
+            Object.keys(tasks).forEach(category => window.renderTasks(category));
+            
+            if (isInitialLoad) {
+                showLoading(false);
+                updateIndicator('success', '✅ Conectado');
+                isInitialLoad = false;
+            } else {
+                updateIndicator('success', '✅ Sincronizado');
+            }
+        }, (error) => {
+            console.error('Erro ao sincronizar:', error);
+            updateIndicator('error', '❌ Erro de conexão');
+            showLoading(false);
+        });
+        
+        window.addTask = async function(category) {
             const input = document.getElementById(`${category}-input`);
             const text = input.value.trim();
             
             if (text) {
-                tasks[category].push({
-                    text: text,
-                    completed: false,
-                    id: Date.now(),
-                    details: ''
-                });
-                input.value = '';
-                renderTasks(category);
-                saveTasks();
+                try {
+                    updateIndicator('syncing', '☁️ Salvando...');
+                    const taskId = Date.now().toString();
+                    
+                    await setDoc(doc(db, 'tasks', taskId), {
+                        category: category,
+                        text: text,
+                        completed: false,
+                        details: '',
+                        createdAt: new Date().toISOString()
+                    });
+                    
+                    input.value = '';
+                } catch (error) {
+                    console.error('Erro ao adicionar:', error);
+                    updateIndicator('error', '❌ Erro ao salvar');
+                }
             }
         }
         
-        function toggleTask(category, id) {
-            if (category === 'daily') return; // Diário não tem checkbox
+        window.toggleTask = async function(category, id) {
+            if (category === 'daily') return;
             
             const task = tasks[category].find(t => t.id === id);
             if (task) {
-                task.completed = !task.completed;
-                renderTasks(category);
-                saveTasks();
+                try {
+                    updateIndicator('syncing', '☁️ Atualizando...');
+                    await setDoc(doc(db, 'tasks', id), {
+                        category: category,
+                        text: task.text,
+                        completed: !task.completed,
+                        details: task.details,
+                        updatedAt: new Date().toISOString()
+                    });
+                } catch (error) {
+                    console.error('Erro ao atualizar:', error);
+                    updateIndicator('error', '❌ Erro ao atualizar');
+                }
             }
         }
         
-        function deleteTask(category, id) {
+        window.deleteTask = async function(category, id) {
             if (confirm('Tem certeza que deseja excluir esta tarefa?')) {
-                tasks[category] = tasks[category].filter(t => t.id !== id);
-                renderTasks(category);
-                saveTasks();
+                try {
+                    updateIndicator('syncing', '☁️ Excluindo...');
+                    await deleteDoc(doc(db, 'tasks', id));
+                } catch (error) {
+                    console.error('Erro ao excluir:', error);
+                    updateIndicator('error', '❌ Erro ao excluir');
+                }
             }
         }
         
-        function startEdit(category, id) {
+        window.startEdit = function(category, id) {
             const task = tasks[category].find(t => t.id === id);
             if (!task) return;
             
             editingTask = { category, id, originalText: task.text };
-            renderTasks(category);
+            window.renderTasks(category);
         }
         
-        function saveEdit(category, id, newText) {
+        window.saveEdit = async function(category, id, newText) {
             const task = tasks[category].find(t => t.id === id);
             if (task && newText.trim()) {
-                task.text = newText.trim();
-                editingTask = null;
-                renderTasks(category);
-                saveTasks();
+                try {
+                    updateIndicator('syncing', '☁️ Salvando...');
+                    await setDoc(doc(db, 'tasks', id), {
+                        category: category,
+                        text: newText.trim(),
+                        completed: task.completed,
+                        details: task.details,
+                        updatedAt: new Date().toISOString()
+                    });
+                    editingTask = null;
+                } catch (error) {
+                    console.error('Erro ao editar:', error);
+                    updateIndicator('error', '❌ Erro ao editar');
+                }
             } else {
-                cancelEdit(category);
+                window.cancelEdit(category);
             }
         }
         
-        function cancelEdit(category) {
+        window.cancelEdit = function(category) {
             editingTask = null;
-            renderTasks(category);
+            window.renderTasks(category);
         }
         
-        function openDetails(category, id) {
+        window.openDetails = function(category, id) {
             const task = tasks[category].find(t => t.id === id);
             if (!task) return;
             
@@ -587,32 +695,42 @@
             
             footer.innerHTML = `
                 <button class="btn-cancel" onclick="closeModal()">Cancelar</button>
-                <button class="btn-save" onclick="saveDetails('${category}', ${id})">Salvar</button>
+                <button class="btn-save" onclick="saveDetails('${category}', '${id}')">Salvar</button>
             `;
             
             modal.classList.add('active');
         }
         
-        function saveDetails(category, id) {
+        window.saveDetails = async function(category, id) {
             const task = tasks[category].find(t => t.id === id);
             const textarea = document.getElementById('detailsTextarea');
             
             if (task) {
-                task.details = textarea.value;
-                saveTasks();
-                closeModal();
+                try {
+                    updateIndicator('syncing', '☁️ Salvando detalhes...');
+                    await setDoc(doc(db, 'tasks', id), {
+                        category: category,
+                        text: task.text,
+                        completed: task.completed,
+                        details: textarea.value,
+                        updatedAt: new Date().toISOString()
+                    });
+                    window.closeModal();
+                } catch (error) {
+                    console.error('Erro ao salvar detalhes:', error);
+                    updateIndicator('error', '❌ Erro ao salvar');
+                }
             }
         }
         
-        function closeModal() {
+        window.closeModal = function() {
             const modal = document.getElementById('detailsModal');
             modal.classList.remove('active');
         }
         
-        function renderTasks(category) {
+        window.renderTasks = function(category) {
             const list = document.getElementById(`${category}-tasks`);
             
-            // Ordenar alfabeticamente
             const sortedTasks = [...tasks[category]].sort((a, b) => 
                 a.text.toLowerCase().localeCompare(b.text.toLowerCase())
             );
@@ -632,10 +750,10 @@
                     return `
                         <li class="task-item">
                             <input type="text" class="edit-input" id="edit-${task.id}" value="${task.text}" 
-                                   onkeypress="if(event.key==='Enter') saveEdit('${category}', ${task.id}, this.value)"
-                                   onblur="saveEdit('${category}', ${task.id}, this.value)">
+                                   onkeypress="if(event.key==='Enter') saveEdit('${category}', '${task.id}', this.value)"
+                                   onblur="saveEdit('${category}', '${task.id}', this.value)">
                             <div class="task-actions" style="opacity: 1;">
-                                <button class="action-btn" onclick="saveEdit('${category}', ${task.id}, document.getElementById('edit-${task.id}').value)" title="Salvar">💾</button>
+                                <button class="action-btn" onclick="saveEdit('${category}', '${task.id}', document.getElementById('edit-${task.id}').value)" title="Salvar">💾</button>
                                 <button class="action-btn" onclick="cancelEdit('${category}')" title="Cancelar">❌</button>
                             </div>
                         </li>
@@ -643,19 +761,18 @@
                 }
                 
                 return `
-                    <li class="task-item ${task.completed ? 'completed' : ''}" ${!isDaily ? `onclick="toggleTask('${category}', ${task.id})"` : ''}>
+                    <li class="task-item ${task.completed ? 'completed' : ''}" ${!isDaily ? `onclick="toggleTask('${category}', '${task.id}')"` : ''}>
                         ${!isDaily ? `<div class="checkbox ${task.completed ? 'checked' : ''}"></div>` : ''}
                         <span class="task-text">${task.text}</span>
                         <div class="task-actions">
-                            <button class="action-btn edit-btn" onclick="event.stopPropagation(); startEdit('${category}', ${task.id})" title="Editar">✏️</button>
-                            <button class="action-btn details-btn" onclick="event.stopPropagation(); openDetails('${category}', ${task.id})" title="Detalhes">${hasDetails ? '📝' : '📄'}</button>
-                            <button class="action-btn delete-btn" onclick="event.stopPropagation(); deleteTask('${category}', ${task.id})" title="Excluir">🗑️</button>
+                            <button class="action-btn edit-btn" onclick="event.stopPropagation(); startEdit('${category}', '${task.id}')" title="Editar">✏️</button>
+                            <button class="action-btn details-btn" onclick="event.stopPropagation(); openDetails('${category}', '${task.id}')" title="Detalhes">${hasDetails ? '📝' : '📄'}</button>
+                            <button class="action-btn delete-btn" onclick="event.stopPropagation(); deleteTask('${category}', '${task.id}')" title="Excluir">🗑️</button>
                         </div>
                     </li>
                 `;
             }).join('');
             
-            // Auto-focus no input de edição
             if (editingTask && editingTask.category === category) {
                 setTimeout(() => {
                     const input = document.getElementById(`edit-${editingTask.id}`);
@@ -667,8 +784,7 @@
             }
         }
         
-        // Exportar dados como backup
-        function exportData() {
+        window.exportData = function() {
             const dataStr = JSON.stringify(tasks, null, 2);
             const dataBlob = new Blob([dataStr], {type: 'application/json'});
             const url = URL.createObjectURL(dataBlob);
@@ -679,60 +795,28 @@
             URL.revokeObjectURL(url);
         }
         
-        // Preparar importação
-        function importData() {
-            document.getElementById('importFile').click();
-        }
-        
-        // Processar arquivo importado
-        function handleImport(event) {
-            const file = event.target.files[0];
-            if (!file) return;
-            
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                try {
-                    const imported = JSON.parse(e.target.result);
-                    if (confirm('Isso irá substituir todas as tarefas atuais. Deseja continuar?')) {
-                        tasks = imported;
-                        Object.keys(tasks).forEach(category => renderTasks(category));
-                        saveTasks();
-                        alert('Dados importados com sucesso!');
-                    }
-                } catch (err) {
-                    alert('Erro ao importar arquivo. Verifique se é um backup válido.');
-                }
-            };
-            reader.readAsText(file);
-            event.target.value = '';
-        }
-        
-        // Fechar modal com ESC
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
-                closeModal();
+                window.closeModal();
             }
         });
         
-        // Fechar modal clicando fora
         document.getElementById('detailsModal').addEventListener('click', (e) => {
             if (e.target.id === 'detailsModal') {
-                closeModal();
+                window.closeModal();
             }
         });
         
-        // Adicionar evento de Enter nos inputs
         document.querySelectorAll('.add-task input').forEach(input => {
             input.addEventListener('keypress', (e) => {
                 if (e.key === 'Enter') {
                     const category = input.id.replace('-input', '');
-                    addTask(category);
+                    window.addTask(category);
                 }
             });
         });
         
-        // Carregar tarefas ao iniciar
-        loadTasks();
+        showLoading(true);
     </script>
 </body>
 </html>
