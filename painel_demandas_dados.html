@@ -23,12 +23,32 @@
             margin: 0 auto;
         }
         
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+        }
+        
         h1 {
             color: white;
-            text-align: center;
-            margin-bottom: 30px;
             font-size: 2.5em;
             text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
+        }
+        
+        .save-indicator {
+            background: rgba(255,255,255,0.2);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 20px;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .save-indicator.saving {
+            background: rgba(255,255,255,0.3);
         }
         
         .grid {
@@ -72,9 +92,7 @@
         .daily { background: #ff6b6b; }
         .monthly { background: #4ecdc4; }
         .bimonthly { background: #45b7d1; }
-        .quarterly { background: #f9ca24; }
         .semiannual { background: #6c5ce7; }
-        .annual { background: #fd79a8; }
         
         h2 {
             color: #2d3436;
@@ -187,11 +205,39 @@
             padding: 20px;
             font-style: italic;
         }
+        
+        .actions {
+            text-align: center;
+            margin-top: 20px;
+        }
+        
+        .btn-action {
+            background: white;
+            color: #667eea;
+            border: 2px solid white;
+            padding: 12px 30px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 16px;
+            margin: 0 10px;
+            transition: all 0.3s ease;
+        }
+        
+        .btn-action:hover {
+            background: #667eea;
+            color: white;
+        }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>📊 Painel de Demandas</h1>
+        <div class="header">
+            <h1>📊 Painel de Demandas</h1>
+            <div class="save-indicator" id="saveIndicator">
+                ✅ Tudo salvo
+            </div>
+        </div>
         
         <div class="grid">
             <!-- Diário -->
@@ -233,7 +279,6 @@
                 </div>
             </div>
             
-
             <!-- Semestral -->
             <div class="card">
                 <div class="card-header">
@@ -246,19 +291,61 @@
                     <button onclick="addTask('semiannual')">+</button>
                 </div>
             </div>
-            
-
+        </div>
+        
+        <div class="actions">
+            <button class="btn-action" onclick="exportData()">📥 Exportar Backup</button>
+            <button class="btn-action" onclick="importData()">📤 Importar Backup</button>
+            <input type="file" id="importFile" style="display: none;" accept=".json" onchange="handleImport(event)">
         </div>
     </div>
     
     <script>
-        const tasks = {
+        const STORAGE_KEY = 'painel_demandas_tasks';
+        let tasks = {
             daily: [],
             monthly: [],
             bimonthly: [],
-            semiannual: [],
-            annual: []
+            semiannual: []
         };
+        
+        // Carregar dados salvos ao iniciar
+        function loadTasks() {
+            const saved = localStorage.getItem(STORAGE_KEY);
+            if (saved) {
+                try {
+                    tasks = JSON.parse(saved);
+                    Object.keys(tasks).forEach(category => renderTasks(category));
+                } catch (e) {
+                    console.error('Erro ao carregar tarefas:', e);
+                }
+            } else {
+                Object.keys(tasks).forEach(category => renderTasks(category));
+            }
+        }
+        
+        // Salvar dados automaticamente
+        function saveTasks() {
+            try {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
+                showSaveIndicator();
+            } catch (e) {
+                console.error('Erro ao salvar tarefas:', e);
+                alert('Erro ao salvar. Seu navegador pode estar com armazenamento cheio.');
+            }
+        }
+        
+        // Mostrar indicador de salvamento
+        function showSaveIndicator() {
+            const indicator = document.getElementById('saveIndicator');
+            indicator.textContent = '💾 Salvando...';
+            indicator.classList.add('saving');
+            
+            setTimeout(() => {
+                indicator.textContent = '✅ Tudo salvo';
+                indicator.classList.remove('saving');
+            }, 500);
+        }
         
         function addTask(category) {
             const input = document.getElementById(`${category}-input`);
@@ -272,6 +359,7 @@
                 });
                 input.value = '';
                 renderTasks(category);
+                saveTasks();
             }
         }
         
@@ -280,12 +368,14 @@
             if (task) {
                 task.completed = !task.completed;
                 renderTasks(category);
+                saveTasks();
             }
         }
         
         function deleteTask(category, id) {
             tasks[category] = tasks[category].filter(t => t.id !== id);
             renderTasks(category);
+            saveTasks();
         }
         
         function renderTasks(category) {
@@ -305,6 +395,46 @@
             `).join('');
         }
         
+        // Exportar dados como backup
+        function exportData() {
+            const dataStr = JSON.stringify(tasks, null, 2);
+            const dataBlob = new Blob([dataStr], {type: 'application/json'});
+            const url = URL.createObjectURL(dataBlob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `painel-demandas-backup-${new Date().toISOString().split('T')[0]}.json`;
+            link.click();
+            URL.revokeObjectURL(url);
+        }
+        
+        // Preparar importação
+        function importData() {
+            document.getElementById('importFile').click();
+        }
+        
+        // Processar arquivo importado
+        function handleImport(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const imported = JSON.parse(e.target.result);
+                    if (confirm('Isso irá substituir todas as tarefas atuais. Deseja continuar?')) {
+                        tasks = imported;
+                        Object.keys(tasks).forEach(category => renderTasks(category));
+                        saveTasks();
+                        alert('Dados importados com sucesso!');
+                    }
+                } catch (err) {
+                    alert('Erro ao importar arquivo. Verifique se é um backup válido.');
+                }
+            };
+            reader.readAsText(file);
+            event.target.value = '';
+        }
+        
         // Adicionar evento de Enter nos inputs
         document.querySelectorAll('.add-task input').forEach(input => {
             input.addEventListener('keypress', (e) => {
@@ -315,8 +445,8 @@
             });
         });
         
-        // Renderizar estado inicial
-        Object.keys(tasks).forEach(category => renderTasks(category));
+        // Carregar tarefas ao iniciar
+        loadTasks();
     </script>
 </body>
 </html>
