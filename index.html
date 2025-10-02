@@ -199,6 +199,7 @@
         .edit-btn { color: #3498db; }
         .details-btn { color: #9b59b6; }
         .delete-btn { color: #ff6b6b; }
+        .files-btn { color: #f39c12; }
         
         .add-task {
             display: flex;
@@ -420,6 +421,141 @@
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
+
+        .files-section {
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 2px solid #e9ecef;
+        }
+
+        .files-section h4 {
+            color: #2d3436;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .file-upload-area {
+            border: 2px dashed #667eea;
+            border-radius: 8px;
+            padding: 20px;
+            text-align: center;
+            background: #f8f9fa;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .file-upload-area:hover {
+            background: #e9ecef;
+            border-color: #5568d3;
+        }
+
+        .file-upload-area.dragover {
+            background: #d1d8ff;
+            border-color: #667eea;
+        }
+
+        .file-list {
+            list-style: none;
+            margin-top: 15px;
+        }
+
+        .file-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            margin-bottom: 8px;
+            transition: all 0.2s ease;
+        }
+
+        .file-item:hover {
+            background: #e9ecef;
+        }
+
+        .file-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex: 1;
+        }
+
+        .file-icon {
+            font-size: 24px;
+        }
+
+        .file-details {
+            flex: 1;
+        }
+
+        .file-name {
+            font-weight: bold;
+            color: #2d3436;
+            display: block;
+        }
+
+        .file-size {
+            font-size: 12px;
+            color: #95a5a6;
+        }
+
+        .file-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .file-btn {
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 18px;
+            padding: 6px;
+            border-radius: 4px;
+            transition: background 0.2s ease;
+        }
+
+        .file-btn:hover {
+            background: rgba(0,0,0,0.1);
+        }
+
+        .download-btn { color: #27ae60; }
+        .view-btn { color: #3498db; }
+        .delete-file-btn { color: #e74c3c; }
+
+        #fileInput {
+            display: none;
+        }
+
+        .file-badge {
+            background: #f39c12;
+            color: white;
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 10px;
+            margin-left: 5px;
+        }
+
+        .file-size-warning {
+            color: #e74c3c;
+            font-size: 12px;
+            margin-top: 5px;
+        }
+
+        .file-content-preview {
+            background: #2d3436;
+            color: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            white-space: pre-wrap;
+            max-height: 400px;
+            overflow-y: auto;
+            margin-top: 15px;
+        }
     </style>
 </head>
 <body>
@@ -504,6 +640,8 @@
         </div>
     </div>
     
+    <input type="file" id="fileInput" multiple accept=".sql,.txt,.pdf,.doc,.docx,.xls,.xlsx,.csv,.json,.xml">
+    
     <script type="module">
         import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
         import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot, query } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
@@ -529,6 +667,9 @@
         
         let editingTask = null;
         let isInitialLoad = true;
+        let currentTaskForFiles = null;
+        
+        const MAX_FILE_SIZE = 1024 * 1024; // 1MB em bytes
         
         function updateIndicator(status, text) {
             const indicator = document.getElementById('saveIndicator');
@@ -543,6 +684,50 @@
             } else {
                 overlay.classList.remove('active');
             }
+        }
+        
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+        }
+        
+        function getFileIcon(fileName) {
+            const ext = fileName.split('.').pop().toLowerCase();
+            const icons = {
+                'sql': '🗃️',
+                'txt': '📄',
+                'pdf': '📕',
+                'doc': '📘',
+                'docx': '📘',
+                'xls': '📊',
+                'xlsx': '📊',
+                'csv': '📊',
+                'json': '📋',
+                'xml': '📋'
+            };
+            return icons[ext] || '📎';
+        }
+        
+        function fileToBase64(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.readAsDataURL(file);
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = error => reject(error);
+            });
+        }
+        
+        function base64ToBlob(base64, mimeType) {
+            const byteCharacters = atob(base64.split(',')[1]);
+            const byteNumbers = new Array(byteCharacters.length);
+            for (let i = 0; i < byteCharacters.length; i++) {
+                byteNumbers[i] = byteCharacters.charCodeAt(i);
+            }
+            const byteArray = new Uint8Array(byteNumbers);
+            return new Blob([byteArray], { type: mimeType });
         }
         
         // Escutar mudanças em tempo real
@@ -564,7 +749,8 @@
                         id: doc.id,
                         text: data.text,
                         completed: data.completed || false,
-                        details: data.details || ''
+                        details: data.details || '',
+                        files: data.files || []
                     });
                 }
             });
@@ -599,6 +785,7 @@
                         text: text,
                         completed: false,
                         details: '',
+                        files: [],
                         createdAt: new Date().toISOString()
                     });
                     
@@ -622,6 +809,7 @@
                         text: task.text,
                         completed: !task.completed,
                         details: task.details,
+                        files: task.files || [],
                         updatedAt: new Date().toISOString()
                     });
                 } catch (error) {
@@ -632,7 +820,7 @@
         }
         
         window.deleteTask = async function(category, id) {
-            if (confirm('Tem certeza que deseja excluir esta tarefa?')) {
+            if (confirm('Tem certeza que deseja excluir esta tarefa? Os arquivos anexados também serão excluídos.')) {
                 try {
                     updateIndicator('syncing', '☁️ Excluindo...');
                     await deleteDoc(doc(db, 'tasks', id));
@@ -661,6 +849,7 @@
                         text: newText.trim(),
                         completed: task.completed,
                         details: task.details,
+                        files: task.files || [],
                         updatedAt: new Date().toISOString()
                     });
                     editingTask = null;
@@ -701,6 +890,262 @@
             modal.classList.add('active');
         }
         
+        window.openFiles = function(category, id) {
+            const task = tasks[category].find(t => t.id === id);
+            if (!task) return;
+            
+            currentTaskForFiles = { category, id };
+            
+            const modal = document.getElementById('detailsModal');
+            const title = document.getElementById('modalTitle');
+            const body = document.getElementById('modalBody');
+            const footer = document.getElementById('modalFooter');
+            
+            title.textContent = `📎 Arquivos - ${task.text}`;
+            
+            const filesHtml = (task.files || []).map((file, index) => `
+                <div class="file-item">
+                    <div class="file-info">
+                        <span class="file-icon">${getFileIcon(file.name)}</span>
+                        <div class="file-details">
+                            <span class="file-name">${file.name}</span>
+                            <span class="file-size">${formatFileSize(file.size)}</span>
+                        </div>
+                    </div>
+                    <div class="file-actions">
+                        ${file.name.endsWith('.sql') || file.name.endsWith('.txt') ? 
+                            `<button class="file-btn view-btn" onclick="viewFileContent('${category}', '${id}', ${index})" title="Visualizar">👁️</button>` : ''}
+                        <button class="file-btn download-btn" onclick="downloadFile('${category}', '${id}', ${index})" title="Baixar">⬇️</button>
+                        <button class="file-btn delete-file-btn" onclick="deleteFile('${category}', '${id}', ${index})" title="Excluir">🗑️</button>
+                    </div>
+                </div>
+            `).join('');
+            
+            body.innerHTML = `
+                <div class="files-section">
+                    <h4>📁 Arquivos Anexados</h4>
+                    ${task.files && task.files.length > 0 ? 
+                        `<ul class="file-list">${filesHtml}</ul>` : 
+                        '<p class="empty-state">Nenhum arquivo anexado</p>'
+                    }
+                    
+                    <div class="file-upload-area" id="uploadArea" onclick="document.getElementById('fileInput').click()">
+                        <p>📤 Clique para selecionar arquivos ou arraste aqui</p>
+                        <p style="font-size: 12px; color: #95a5a6; margin-top: 8px;">
+                            Formatos aceitos: .sql, .txt, .pdf, .doc, .docx, .xls, .xlsx, .csv, .json, .xml
+                        </p>
+                        <p style="font-size: 11px; color: #e74c3c; margin-top: 5px;">
+                            Limite: 1MB por arquivo (ideal para arquivos .sql)
+                        </p>
+                    </div>
+                    <div id="uploadStatus"></div>
+                </div>
+            `;
+            
+            footer.innerHTML = `
+                <button class="btn-cancel" onclick="closeModal()">Fechar</button>
+            `;
+            
+            modal.classList.add('active');
+            setupDragAndDrop();
+        }
+        
+        window.viewFileContent = function(category, id, fileIndex) {
+            const task = tasks[category].find(t => t.id === id);
+            if (!task || !task.files[fileIndex]) return;
+            
+            const file = task.files[fileIndex];
+            const modal = document.getElementById('detailsModal');
+            const title = document.getElementById('modalTitle');
+            const body = document.getElementById('modalBody');
+            const footer = document.getElementById('modalFooter');
+            
+            title.textContent = `📄 ${file.name}`;
+            
+            // Decode base64 to text
+            const base64Content = file.data.split(',')[1];
+            const decodedContent = atob(base64Content);
+            
+            body.innerHTML = `
+                <div class="file-content-preview">${decodedContent}</div>
+            `;
+            
+            footer.innerHTML = `
+                <button class="btn-cancel" onclick="openFiles('${category}', '${id}')">Voltar</button>
+                <button class="btn-save" onclick="downloadFile('${category}', '${id}', ${fileIndex})">⬇️ Baixar</button>
+            `;
+        }
+        
+        function setupDragAndDrop() {
+            const uploadArea = document.getElementById('uploadArea');
+            if (!uploadArea) return;
+            
+            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+                uploadArea.addEventListener(eventName, preventDefaults, false);
+            });
+            
+            function preventDefaults(e) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+            
+            ['dragenter', 'dragover'].forEach(eventName => {
+                uploadArea.addEventListener(eventName, () => {
+                    uploadArea.classList.add('dragover');
+                }, false);
+            });
+            
+            ['dragleave', 'drop'].forEach(eventName => {
+                uploadArea.addEventListener(eventName, () => {
+                    uploadArea.classList.remove('dragover');
+                }, false);
+            });
+            
+            uploadArea.addEventListener('drop', (e) => {
+                const dt = e.dataTransfer;
+                const files = dt.files;
+                handleFiles(files);
+            }, false);
+        }
+        
+        document.getElementById('fileInput').addEventListener('change', (e) => {
+            handleFiles(e.target.files);
+            e.target.value = '';
+        });
+        
+        async function handleFiles(files) {
+            if (!currentTaskForFiles) return;
+            
+            const { category, id } = currentTaskForFiles;
+            const task = tasks[category].find(t => t.id === id);
+            if (!task) return;
+            
+            const statusDiv = document.getElementById('uploadStatus');
+            const validFiles = [];
+            const errors = [];
+            
+            // Validar arquivos
+            for (const file of files) {
+                if (file.size > MAX_FILE_SIZE) {
+                    errors.push(`❌ ${file.name} é muito grande (máx: 1MB)`);
+                } else {
+                    validFiles.push(file);
+                }
+            }
+            
+            if (errors.length > 0) {
+                statusDiv.innerHTML = `
+                    <div style="margin-top: 10px; padding: 10px; background: #ffe5e5; border-radius: 8px; color: #e74c3c;">
+                        ${errors.join('<br>')}
+                    </div>
+                `;
+            }
+            
+            if (validFiles.length === 0) return;
+            
+            try {
+                updateIndicator('syncing', '☁️ Salvando arquivos...');
+                
+                statusDiv.innerHTML = `
+                    <div style="margin-top: 10px; padding: 10px; background: #e3f2fd; border-radius: 8px; color: #1976d2;">
+                        📤 Processando ${validFiles.length} arquivo(s)...
+                    </div>
+                `;
+                
+                const newFiles = [];
+                
+                for (const file of validFiles) {
+                    const base64Data = await fileToBase64(file);
+                    
+                    newFiles.push({
+                        name: file.name,
+                        size: file.size,
+                        type: file.type,
+                        data: base64Data,
+                        uploadedAt: new Date().toISOString()
+                    });
+                }
+                
+                const updatedFiles = [...(task.files || []), ...newFiles];
+                
+                await setDoc(doc(db, 'tasks', id), {
+                    category: category,
+                    text: task.text,
+                    completed: task.completed,
+                    details: task.details,
+                    files: updatedFiles,
+                    updatedAt: new Date().toISOString()
+                });
+                
+                updateIndicator('success', '✅ Arquivos salvos');
+                statusDiv.innerHTML = `
+                    <div style="margin-top: 10px; padding: 10px; background: #e8f5e9; border-radius: 8px; color: #2e7d32;">
+                        ✅ ${validFiles.length} arquivo(s) salvo(s) com sucesso!
+                    </div>
+                `;
+                
+                setTimeout(() => {
+                    window.openFiles(category, id);
+                }, 1500);
+                
+            } catch (error) {
+                console.error('Erro ao salvar arquivos:', error);
+                updateIndicator('error', '❌ Erro ao salvar');
+                statusDiv.innerHTML = `
+                    <div style="margin-top: 10px; padding: 10px; background: #ffe5e5; border-radius: 8px; color: #e74c3c;">
+                        ❌ Erro ao salvar arquivos
+                    </div>
+                `;
+            }
+        }
+        
+        window.downloadFile = function(category, id, fileIndex) {
+            const task = tasks[category].find(t => t.id === id);
+            if (!task || !task.files[fileIndex]) return;
+            
+            const file = task.files[fileIndex];
+            const blob = base64ToBlob(file.data, file.type);
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = file.name;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+        }
+        
+        window.deleteFile = async function(category, id, fileIndex) {
+            if (!confirm('Tem certeza que deseja excluir este arquivo?')) return;
+            
+            try {
+                updateIndicator('syncing', '☁️ Excluindo arquivo...');
+                
+                const task = tasks[category].find(t => t.id === id);
+                if (!task) return;
+                
+                const updatedFiles = task.files.filter((_, index) => index !== fileIndex);
+                
+                await setDoc(doc(db, 'tasks', id), {
+                    category: category,
+                    text: task.text,
+                    completed: task.completed,
+                    details: task.details,
+                    files: updatedFiles,
+                    updatedAt: new Date().toISOString()
+                });
+                
+                updateIndicator('success', '✅ Arquivo excluído');
+                
+                setTimeout(() => {
+                    window.openFiles(category, id);
+                }, 500);
+            } catch (error) {
+                console.error('Erro ao excluir arquivo:', error);
+                updateIndicator('error', '❌ Erro ao excluir');
+            }
+        }
+        
         window.saveDetails = async function(category, id) {
             const task = tasks[category].find(t => t.id === id);
             const textarea = document.getElementById('detailsTextarea');
@@ -713,6 +1158,7 @@
                         text: task.text,
                         completed: task.completed,
                         details: textarea.value,
+                        files: task.files || [],
                         updatedAt: new Date().toISOString()
                     });
                     window.closeModal();
@@ -726,6 +1172,7 @@
         window.closeModal = function() {
             const modal = document.getElementById('detailsModal');
             modal.classList.remove('active');
+            currentTaskForFiles = null;
         }
         
         window.renderTasks = function(category) {
@@ -745,6 +1192,8 @@
             list.innerHTML = sortedTasks.map(task => {
                 const isEditing = editingTask && editingTask.category === category && editingTask.id === task.id;
                 const hasDetails = task.details && task.details.trim().length > 0;
+                const hasFiles = task.files && task.files.length > 0;
+                const fileCount = task.files ? task.files.length : 0;
                 
                 if (isEditing) {
                     return `
@@ -767,6 +1216,9 @@
                         <div class="task-actions">
                             <button class="action-btn edit-btn" onclick="event.stopPropagation(); startEdit('${category}', '${task.id}')" title="Editar">✏️</button>
                             <button class="action-btn details-btn" onclick="event.stopPropagation(); openDetails('${category}', '${task.id}')" title="Detalhes">${hasDetails ? '📝' : '📄'}</button>
+                            <button class="action-btn files-btn" onclick="event.stopPropagation(); openFiles('${category}', '${task.id}')" title="Arquivos">
+                                📎${hasFiles ? `<span class="file-badge">${fileCount}</span>` : ''}
+                            </button>
                             <button class="action-btn delete-btn" onclick="event.stopPropagation(); deleteTask('${category}', '${task.id}')" title="Excluir">🗑️</button>
                         </div>
                     </li>
