@@ -214,6 +214,7 @@
         }
         
         .details-btn { color: #9b59b6; }
+        .files-btn { color: #f39c12; }
         
         .empty-state {
             text-align: center;
@@ -357,13 +358,114 @@
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
+
+        .file-badge {
+            background: #f39c12;
+            color: white;
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 10px;
+            margin-left: 5px;
+        }
+
+        .files-section {
+            margin-top: 20px;
+        }
+
+        .files-section h4 {
+            color: #2d3436;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .file-list {
+            list-style: none;
+        }
+
+        .file-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            margin-bottom: 8px;
+            transition: all 0.2s ease;
+        }
+
+        .file-item:hover {
+            background: #e9ecef;
+        }
+
+        .file-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex: 1;
+        }
+
+        .file-icon {
+            font-size: 24px;
+        }
+
+        .file-details {
+            flex: 1;
+        }
+
+        .file-name {
+            font-weight: bold;
+            color: #2d3436;
+            display: block;
+        }
+
+        .file-size {
+            font-size: 12px;
+            color: #95a5a6;
+        }
+
+        .file-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .file-btn {
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 18px;
+            padding: 6px;
+            border-radius: 4px;
+            transition: background 0.2s ease;
+        }
+
+        .file-btn:hover {
+            background: rgba(0,0,0,0.1);
+        }
+
+        .download-btn { color: #27ae60; }
+        .view-btn { color: #3498db; }
+
+        .file-content-preview {
+            background: #2d3436;
+            color: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            white-space: pre-wrap;
+            max-height: 400px;
+            overflow-y: auto;
+            margin-top: 15px;
+        }
     </style>
 </head>
 <body>
     <div class="loading-overlay" id="loadingOverlay">
         <div class="loading-spinner">
             <div class="spinner"></div>
-            <p>Conectando ao Firebase...</p>
+            <p>Carregando dados...</p>
         </div>
     </div>
 
@@ -426,6 +528,7 @@
                 <button class="close-modal" onclick="closeModal()">&times;</button>
             </div>
             <div id="modalBody"></div>
+            <div class="modal-footer" id="modalFooter"></div>
         </div>
     </div>
     
@@ -468,8 +571,43 @@
                 overlay.classList.remove('active');
             }
         }
+
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+        }
         
-        // Escutar mudanças em tempo real
+        function getFileIcon(fileName) {
+            const ext = fileName.split('.').pop().toLowerCase();
+            const icons = {
+                'sql': '🗃️',
+                'txt': '📄',
+                'pdf': '📕',
+                'doc': '📘',
+                'docx': '📘',
+                'xls': '📊',
+                'xlsx': '📊',
+                'csv': '📊',
+                'json': '📋',
+                'xml': '📋'
+            };
+            return icons[ext] || '📎';
+        }
+
+        function base64ToBlob(base64, mimeType) {
+            const byteCharacters = atob(base64.split(',')[1]);
+            const byteNumbers = new Array(byteCharacters.length);
+            for (let i = 0; i < byteCharacters.length; i++) {
+                byteNumbers[i] = byteCharacters.charCodeAt(i);
+            }
+            const byteArray = new Uint8Array(byteNumbers);
+            return new Blob([byteArray], { type: mimeType });
+        }
+        
+        // Escutar mudanças em tempo real (somente leitura)
         const q = query(collection(db, 'tasks'));
         onSnapshot(q, (snapshot) => {
             const newTasks = {
@@ -488,23 +626,26 @@
                         id: doc.id,
                         text: data.text,
                         completed: data.completed || false,
-                        details: data.details || ''
+                        details: data.details || '',
+                        files: data.files || []
                     });
                 }
             });
             
             tasks = newTasks;
-            Object.keys(tasks).forEach(category => window.renderTasks(category));
+            Object.keys(tasks).forEach(category => {
+                window.renderTasks(category);
+            });
             
             if (isInitialLoad) {
                 showLoading(false);
                 updateIndicator('success', '✅ Conectado');
                 isInitialLoad = false;
             } else {
-                updateIndicator('success', '✅ Sincronizado');
+                updateIndicator('success', '✅ Atualizado');
             }
         }, (error) => {
-            console.error('Erro ao sincronizar:', error);
+            console.error('Erro ao carregar:', error);
             updateIndicator('error', '❌ Erro de conexão');
             showLoading(false);
         });
@@ -516,6 +657,7 @@
             const modal = document.getElementById('detailsModal');
             const title = document.getElementById('modalTitle');
             const body = document.getElementById('modalBody');
+            const footer = document.getElementById('modalFooter');
             
             title.textContent = task.text;
             
@@ -524,8 +666,99 @@
             } else {
                 body.innerHTML = `<div class="details-content no-details">Nenhum detalhe adicionado para esta tarefa.</div>`;
             }
+
+            footer.innerHTML = `
+                <button class="btn-cancel" onclick="closeModal()">Fechar</button>
+            `;
             
             modal.classList.add('active');
+        }
+
+        window.openFiles = function(category, id) {
+            const task = tasks[category].find(t => t.id === id);
+            if (!task) return;
+            
+            const modal = document.getElementById('detailsModal');
+            const title = document.getElementById('modalTitle');
+            const body = document.getElementById('modalBody');
+            const footer = document.getElementById('modalFooter');
+            
+            title.textContent = `📎 Arquivos - ${task.text}`;
+            
+            const filesHtml = (task.files || []).map((file, index) => `
+                <div class="file-item">
+                    <div class="file-info">
+                        <span class="file-icon">${getFileIcon(file.name)}</span>
+                        <div class="file-details">
+                            <span class="file-name">${file.name}</span>
+                            <span class="file-size">${formatFileSize(file.size)}</span>
+                        </div>
+                    </div>
+                    <div class="file-actions">
+                        ${file.name.endsWith('.sql') || file.name.endsWith('.txt') ? 
+                            `<button class="file-btn view-btn" onclick="viewFileContent('${category}', '${id}', ${index})" title="Visualizar">👁️</button>` : ''}
+                        <button class="file-btn download-btn" onclick="downloadFile('${category}', '${id}', ${index})" title="Baixar">⬇️</button>
+                    </div>
+                </div>
+            `).join('');
+            
+            body.innerHTML = `
+                <div class="files-section">
+                    <h4>📁 Arquivos Anexados</h4>
+                    ${task.files && task.files.length > 0 ? 
+                        `<ul class="file-list">${filesHtml}</ul>` : 
+                        '<p class="empty-state">Nenhum arquivo anexado</p>'
+                    }
+                </div>
+            `;
+            
+            footer.innerHTML = `
+                <button class="btn-cancel" onclick="closeModal()">Fechar</button>
+            `;
+            
+            modal.classList.add('active');
+        }
+
+        window.viewFileContent = function(category, id, fileIndex) {
+            const task = tasks[category].find(t => t.id === id);
+            if (!task || !task.files[fileIndex]) return;
+            
+            const file = task.files[fileIndex];
+            const modal = document.getElementById('detailsModal');
+            const title = document.getElementById('modalTitle');
+            const body = document.getElementById('modalBody');
+            const footer = document.getElementById('modalFooter');
+            
+            title.textContent = `📄 ${file.name}`;
+            
+            // Decode base64 to text
+            const base64Content = file.data.split(',')[1];
+            const decodedContent = atob(base64Content);
+            
+            body.innerHTML = `
+                <div class="file-content-preview">${decodedContent}</div>
+            `;
+            
+            footer.innerHTML = `
+                <button class="btn-cancel" onclick="openFiles('${category}', '${id}')">Voltar</button>
+                <button class="btn-save" onclick="downloadFile('${category}', '${id}', ${fileIndex})">⬇️ Baixar</button>
+            `;
+        }
+
+        window.downloadFile = function(category, id, fileIndex) {
+            const task = tasks[category].find(t => t.id === id);
+            if (!task || !task.files[fileIndex]) return;
+            
+            const file = task.files[fileIndex];
+            const blob = base64ToBlob(file.data, file.type);
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = file.name;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
         }
         
         window.closeModal = function() {
@@ -549,13 +782,16 @@
             
             list.innerHTML = sortedTasks.map(task => {
                 const hasDetails = task.details && task.details.trim().length > 0;
+                const hasFiles = task.files && task.files.length > 0;
+                const fileCount = task.files ? task.files.length : 0;
                 
                 return `
                     <li class="task-item ${task.completed ? 'completed' : ''}">
                         ${!isDaily ? `<div class="checkbox ${task.completed ? 'checked' : ''}"></div>` : ''}
                         <span class="task-text">${task.text}</span>
                         <div class="task-actions">
-                            <button class="action-btn details-btn" onclick="event.stopPropagation(); openDetails('${category}', '${task.id}')" title="Detalhes">${hasDetails ? '📝' : '📄'}</button>
+                            <button class="action-btn details-btn" onclick="event.stopPropagation(); openDetails('${category}', '${task.id}')" title="Ver detalhes">${hasDetails ? '📝' : '📄'}</button>
+                            ${hasFiles ? `<button class="action-btn files-btn" onclick="event.stopPropagation(); openFiles('${category}', '${task.id}')" title="Ver arquivos">📎<span class="file-badge">${fileCount}</span></button>` : ''}
                         </div>
                     </li>
                 `;
